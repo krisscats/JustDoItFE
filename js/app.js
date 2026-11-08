@@ -55,12 +55,13 @@
     openUserDialog(null, true);
   };
 
+  // Modificación: se usa getByUsername para buscar directo en el backend 
+  // en lugar de descargar toda la lista con list(). (Funcionalidad 1)
   $('login-form').onsubmit = (e) => {
     e.preventDefault();
     guard(async () => {
-      const name = $('login-username').value.trim().toLowerCase();
-      const list = await Api.users.list();
-      const found = list.find((u) => (u.userName || '').toLowerCase() === name);
+      const name = $('login-username').value.trim();
+      const found = await Api.users.getByUsername(name);
       if (!found) throw new Error('Usuario no encontrado');
       startSession(found);
     });
@@ -167,34 +168,87 @@
   }
 
   // ---------- Tareas ----------
+
+  
+  // 1. Función principal que descarga las tareas del usuario actual y manda a dibujarlas
   async function loadTasks() {
     tasks = await Api.tasks.list(targetUserId());
     renderTasks();
   }
 
+  // 2. Función encargaa de construir y pintar las tarjetas de tareas en la pantalla del navegador
   function renderTasks() {
-    const list = $('task-list');
-    const filter = $('task-filter').value;
-    list.textContent = '';
+    const list = $('task-list'); //contenedor HTML donde se van a insertar las tarjetas
+    const filter = $('task-filter').value; //filtro seleccionado por el usuario (Todas, Pendientes, etc.)
+    list.textContent = ''; //se limpia la lista visual anterior para evitar duplicados
+
+    //se filtran las tareas según lo que el usuario haya seleccionado en el menú desplegable de filtros
     const shown = tasks.filter((t) => !filter || t.status === filter);
-    if (!shown.length) { list.append(el('div', { class: 'empty' }, 'No hay tareas')); return; }
+    
+//si no hay tareas para mostrar,sale un mensaje de aviso y salimos de la función
+    if (!shown.length) { 
+      list.append(el('div', { class: 'empty' }, 'No hay tareas')); 
+      return; 
+    }
+    
     shown.forEach((t) => {
+      //se crea un selector (dropdown) nativo para cambiar el estado manualmente si se desea
       const select = el('select', { 'aria-label': 'Cambiar estado' },
         Object.entries(STATUS_LABEL).map(([v, l]) => el('option', { value: v }, l)));
       select.value = t.status;
+      
+//Evento: al cambiar el select, se manda una petición PATCH al servidor para actualizar el estado
       select.onchange = () => guard(async () => {
         await Api.tasks.update(targetUserId(), t.id, { status: select.value });
         await loadTasks();
       });
+
+      // FUNCIONALIDAD 2: Lógica del botón "Avanzar"
+// sw evalua el estado actual de la tarea para decidir si mostramos el botón y qué hace al presionarlo
+      let botonAvanzar = null;
+
+      if (t.status === 'PENDING') {
+//si está Pendiente, al hacer clic avanza al siguiente estado: En Progreso (INPROGRESS)
+        botonAvanzar = el('button', {
+          class: 'btn primary small',
+          onclick: () => guard(async () => {
+            await Api.tasks.update(targetUserId(), t.id, { status: 'INPROGRESS' });
+            toast('Tarea avanzada a En progreso');
+            await loadTasks();
+          })
+        }, 'Avanzar');
+
+      } else if (t.status === 'INPROGRESS') {
+// Si está En Progreso, al hacer clic avanza al estado final: Hecha (DONE)
+        botonAvanzar = el('button', {
+          class: 'btn primary small',
+          onclick: () => guard(async () => {
+            await Api.tasks.update(targetUserId(), t.id, { status: 'DONE' });
+            toast('Tarea avanzada a Hecha');
+            await loadTasks();
+          })
+        }, 'Avanzar');
+      }
+      // Nota: Si el estado es 'DONE', botonAvanzar se queda en null, por lo que el botón no se dibuja.
       list.append(el('article', { class: 'card task ' + t.status },
-        el('div', { class: 'row' }, el('span', { class: 'badge ' + t.status }, STATUS_LABEL[t.status] || t.status),
-          el('span', { class: 'meta' }, '#' + t.id)),
+//cabecera de la tarjeta con su badge de estado y su ID
+        el('div', { class: 'row' }, 
+          el('span', { class: 'badge ' + t.status }, STATUS_LABEL[t.status] || t.status),
+          el('span', { class: 'meta' }, '#' + t.id)
+        ),
+        //descripción de la tarea
         el('p', {}, t.description || ''),
+        //Fechas de límite y creación formateadas
         el('div', { class: 'meta' }, 'Límite: ' + (t.deadline || '-') + ' · Creada: ' + fmtDate(t.createdAt)),
+        //Selector manual de estado
         select,
+        // Fila inferior con los botones de acción (avanzar, editar y eliminar)
         el('div', { class: 'row' },
+          botonAvanzar ? botonAvanzar : '', //se muestra boton de avanzar solo si aplica
           el('button', { class: 'btn ghost small', onclick: () => openTaskDialog(t) }, 'Editar'),
-          el('button', { class: 'btn danger small', onclick: () => deleteTask(t) }, 'Eliminar'))));
+          el('button', { class: 'btn danger small', onclick: () => deleteTask(t) }, 'Eliminar')
+        )
+      ));
     });
   }
 

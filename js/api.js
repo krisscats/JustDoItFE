@@ -40,6 +40,11 @@ const Api = (() => {
     users: {
       list: () => request('GET', '/users'),
       get: (id) => request('GET', `/users/${id}`),
+      
+      // Modificación:se agrega este método para consultar directamente 
+      // al usuario por su username y optimizar el login (Funcionalidad 1).
+      getByUsername: (username) => request('GET', `/users/byusername/${username}`),
+
       create: (u) => request('POST', '/users', u),
       update: (id, u) => request('PATCH', `/users/${id}`, u),
       remove: (id) => request('DELETE', `/users/${id}`),
